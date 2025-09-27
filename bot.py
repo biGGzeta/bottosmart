@@ -67,9 +67,10 @@ class GridBot:
             pass
         if sig:
             self.last_signal = sig
-            # Aquí podrías pasar override si quieres, por ejemplo:
-            # self.grid_manager.activate_grid(self.last_price, sig, override={"min_grid_spacing": 0.001})
-            self.grid_manager.activate_grid(self.last_price, sig)
+            # Aquí cada señal podría incluir flags/actions para gestión avanzada
+            # Ejemplo:
+            # sig = {"tipo": "DUMP", "cancel_all_limits": True, "adjust_tp": True, "adjust_sl": True, "nuevo_grid": True}
+            self.grid_manager.handle_signal(sig, self.last_price)
         self.grid_manager.check_expiry()
         await self.colocar_tp_y_sl_si_corresponde()
 
@@ -81,7 +82,7 @@ class GridBot:
             pass
         if soporte:
             self.last_signal = soporte
-            self.grid_manager.activate_grid(self.last_price, soporte)
+            self.grid_manager.handle_signal(soporte, self.last_price)
         self.grid_manager.check_expiry()
         await self.colocar_tp_y_sl_si_corresponde()
 
