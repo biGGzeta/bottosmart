@@ -6,6 +6,7 @@ from binance_client import BinanceClient
 from orders import OrderManager
 from state_manager import StateManager
 import strategy
+from grid_manager import GridManager
 
 from config import (
     SYMBOL, MIN_GRID_SPACING, MAX_GRID_SPACING,
@@ -23,11 +24,9 @@ class GridBot:
         self.client = BinanceClient()
         self.orders = OrderManager(self.client)
         self.state = StateManager()
+        self.grid_manager = GridManager(self.orders, self.state)
         self.last_price = None
         self.last_signal = None
-        self.current_spacing = (MIN_GRID_SPACING + MAX_GRID_SPACING) / 2
-        self.current_range = (GRID_RANGE_MIN + GRID_RANGE_MAX) / 2
-        self._last_rebalance = 0
 
         print(f"[INFO] PAPER_MODE={'ON' if PAPER_MODE else 'OFF'} | ENV={'TEST' if self.client.client.testnet else 'PROD'} | Symbol={SYMBOL}")
 
@@ -73,14 +72,21 @@ class GridBot:
             self.last_price = float(msg.get('p') or self.last_price or 0)
         except Exception:
             pass
-        await self._rebalance_si_corresponde()
+        # Integración: activa grid solo si hay señal relevante (ejemplo: 'DUMP')
+        if sig:
+            self.grid_manager.activate_grid(self.last_price, sig)
+        self.grid_manager.check_expiry()
+        await self.colocar_tp_y_sl_si_corresponde()
 
     async def procesar_depth(self, msg):
         soporte = strategy.analizar_depth(msg)
         if soporte:
             self.last_signal = soporte
             print(f"[ESTRATEGIA] Soporte detectado en {soporte['precio']} (vol {round(soporte['volumen'],3)}) → spacing MIN")
-        await self._rebalance_si_corresponde()
+            # Integración: activa grid solo si hay señal de soporte fuerte
+            self.grid_manager.activate_grid(self.last_price, soporte)
+        self.grid_manager.check_expiry()
+        await self.colocar_tp_y_sl_si_corresponde()
 
     async def procesar_ticker(self, msg):
         try:
@@ -88,7 +94,8 @@ class GridBot:
             self.last_price = price
         except Exception:
             pass
-        await self._rebalance_si_corresponde()
+        self.grid_manager.check_expiry()
+        await self.colocar_tp_y_sl_si_corresponde()
 
     async def procesar_user(self, msg):
         try:
@@ -108,85 +115,6 @@ class GridBot:
                 await self.colocar_tp_y_sl_si_corresponde()
         except Exception as e:
             print(f"[USER] error parse: {e}")
-
-    async def _rebalance_si_corresponde(self):
-        now = time.time()
-        if self.last_price is None or self.last_price == 0:
-            print("[GRID] Precio no válido para rebalanceo, omitiendo...")
-            return
-        if now - self._last_rebalance < REBALANCE_SECONDS:
-            return
-
-        self.current_spacing = strategy.recomendar_spacing(self.last_signal, MIN_GRID_SPACING, MAX_GRID_SPACING)
-        self.current_range = strategy.recomendar_rango(self.last_signal, GRID_RANGE_MIN, GRID_RANGE_MAX)
-        niveles = strategy.construir_grid(self.last_price, self.current_spacing, self.current_range)
-        niveles = await self._cap_por_margen(niveles)
-
-        self._last_rebalance = now
-        if not niveles:
-            print("[GRID] No hay niveles para grid.")
-            return
-
-        contexto = self._get_contexto_log()
-        guardar_estado_vivo(contexto)
-        guardar_historico(contexto)
-
-        print(f"[GRID] Rebalance spacing={round(self.current_spacing*100,2)}% range={round(self.current_range*100,2)}% niveles={len(niveles)}")
-
-        try:
-            self.orders.cancel_all()
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            print(f"[ERROR] Cancelar todas: {e}")
-
-        open_orders = self.orders.get_open_orders()
-        if open_orders:
-            print(f"[WARN] Quedaron {len(open_orders)} órdenes abiertas antes de crear grid nuevo")
-
-        avg_entry = self.state.calcular_costo_promedio()
-        for p in niveles:
-            if p is None or p == 0:
-                continue
-            if avg_entry and p >= avg_entry:
-                print(f"[SAFE GRID] No se coloca orden en {p} porque está por encima del promedio de entrada ({avg_entry})")
-                continue
-            if avg_entry and ((avg_entry - p)/avg_entry < SAFE_SPREAD):
-                print(f"[SAFE GRID] No se coloca orden en {p} porque no mejora el promedio suficiente (SAFE_SPREAD={SAFE_SPREAD})")
-                continue
-            qty = self.orders.calcular_cantidad(p, ORDER_USDT_SIZE, LEVERAGE)
-            if qty is None or qty == 0:
-                continue
-            try:
-                self.orders.colocar_orden_limit('BUY', p, qty, reduce_only=False)
-            except Exception as e:
-                print(f"[ERROR] crear orden grid: {e}")
-
-        await self.colocar_tp_y_sl_si_corresponde()
-
-    async def _cap_por_margen(self, niveles):
-        if PAPER_MODE:
-            return niveles[:20]
-        try:
-            avail = self.client.get_available_balance()
-            if avail <= 0:
-                return niveles[:5]
-            max_orders = int(avail // float(ORDER_USDT_SIZE))
-            if max_orders <= 0:
-                max_orders = 1
-            return niveles[:max_orders]
-        except Exception:
-            return niveles[:10]
-
-    def _tp_threshold_neto(self):
-        pos = float(self.state.state.get('posicion_total', 0.0))
-        if pos <= 0:
-            return None
-        avg = self.state.calcular_costo_promedio()
-        notional = pos * avg
-        fees_compras = float(self.state.state.get('fees_total', 0.0))
-        maker_fee_venta = MAKER_FEE_RATE * notional
-        threshold = MIN_PROFIT_THRESHOLD + (fees_compras + maker_fee_venta) / notional
-        return threshold
 
     async def colocar_tp_y_sl_si_corresponde(self):
         pos = float(self.state.state.get('posicion_total', 0.0))
@@ -252,6 +180,6 @@ class GridBot:
         await ws.start_all(handler)
 
 if __name__ == "__main__":
-    print("[BOT] Iniciando ETH Grid Bot Dinámico...")
+    print("[BOT] Iniciando ETH Grid Bot Dinámico con GridManager...")
     bot = GridBot()
     asyncio.run(bot.run())
