@@ -9,11 +9,7 @@ import strategy
 from grid_manager import GridManager
 
 from config import (
-    SYMBOL, MIN_GRID_SPACING, MAX_GRID_SPACING,
-    GRID_RANGE_MIN, GRID_RANGE_MAX, REBALANCE_SECONDS,
-    MIN_PROFIT_THRESHOLD, TP_OFFSET_LOW, TP_OFFSET_MID, TP_OFFSET_HIGH,
-    STOP_LOSS_PERCENTAGE, PAPER_MODE, MAKER_FEE_RATE,
-    ORDER_USDT_SIZE, LEVERAGE, SAFE_SPREAD
+    SYMBOL, STOP_LOSS_PERCENTAGE, PAPER_MODE, MAKER_FEE_RATE,
 )
 from logger import guardar_estado_vivo, guardar_historico
 
@@ -65,25 +61,26 @@ class GridBot:
 
     async def procesar_trade(self, msg):
         sig = strategy.analizar_trade(msg)
-        if sig == 'DUMP':
-            self.last_signal = sig
-            print("[ESTRATEGIA] Caída rápida detectada → spacing MAX")
         try:
             self.last_price = float(msg.get('p') or self.last_price or 0)
         except Exception:
             pass
-        # Integración: activa grid solo si hay señal relevante (ejemplo: 'DUMP')
         if sig:
+            self.last_signal = sig
+            # Aquí podrías pasar override si quieres, por ejemplo:
+            # self.grid_manager.activate_grid(self.last_price, sig, override={"min_grid_spacing": 0.001})
             self.grid_manager.activate_grid(self.last_price, sig)
         self.grid_manager.check_expiry()
         await self.colocar_tp_y_sl_si_corresponde()
 
     async def procesar_depth(self, msg):
         soporte = strategy.analizar_depth(msg)
+        try:
+            self.last_price = float(msg.get('c') or self.last_price or 0)
+        except Exception:
+            pass
         if soporte:
             self.last_signal = soporte
-            print(f"[ESTRATEGIA] Soporte detectado en {soporte['precio']} (vol {round(soporte['volumen'],3)}) → spacing MIN")
-            # Integración: activa grid solo si hay señal de soporte fuerte
             self.grid_manager.activate_grid(self.last_price, soporte)
         self.grid_manager.check_expiry()
         await self.colocar_tp_y_sl_si_corresponde()
@@ -157,6 +154,7 @@ class GridBot:
                 "stop_loss": {"price": stop_loss.get("stopPrice")},
                 "bot_version": BOT_VERSION,
                 "symbol": SYMBOL,
+                "grid_status": self.grid_manager.status(),
             }
         except Exception as e:
             contexto = {"error": str(e), "timestamp": datetime.now(UTC).isoformat()}
