@@ -28,7 +28,7 @@ def evaluar_senales():
         return None
     ventas = [t for t in ultimos if t['sell']]
     vol_ventas = sum(t['qty'] for t in ventas)
-    freq = len(ultimos) / 2.0  # trades/s
+    freq = len(ultimos) / 2.0
     if freq > 15 and vol_ventas > 10:
         if now - _last_dump_ts > COOLDOWN_MS:
             _last_dump_ts = now
