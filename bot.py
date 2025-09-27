@@ -48,7 +48,6 @@ class GridBot:
             open_orders = self.orders.get_open_orders()
             tp_ok = False
             sl_ok = False
-            # Verifica si hay TP/SL activos
             for o in open_orders:
                 if o.get('side') == 'SELL' and o.get('reduceOnly'):
                     tp_target = entry_price * 1.003
@@ -56,7 +55,6 @@ class GridBot:
                         tp_ok = True
                 if o.get('type') in ("STOP_MARKET", "STOP") and o.get('closePosition') in (True, 'true', 'True'):
                     sl_ok = True
-            # Si no existen, crear TP/SL
             if not tp_ok:
                 self.orders.place_tp_sell(entry_price*1.003, abs(qty), "AUTO_TP")
                 print(f"[STARTUP] TP repuesto en {self.client.round_price(entry_price*1.003):.2f}")
@@ -129,11 +127,9 @@ class GridBot:
             print("[GRID] No hay niveles para grid.")
             return
 
-        # --- LOGGING ---
         contexto = self._get_contexto_log()
         guardar_estado_vivo(contexto)
         guardar_historico(contexto)
-        # --- END LOGGING ---
 
         print(f"[GRID] Rebalance spacing={round(self.current_spacing*100,2)}% range={round(self.current_range*100,2)}% niveles={len(niveles)}")
 
@@ -151,7 +147,6 @@ class GridBot:
         for p in niveles:
             if p is None or p == 0:
                 continue
-            # SAFE: Solo colocar la orden si está por debajo del promedio y mejora el promedio lo suficiente
             if avg_entry and p >= avg_entry:
                 print(f"[SAFE GRID] No se coloca orden en {p} porque está por encima del promedio de entrada ({avg_entry})")
                 continue
