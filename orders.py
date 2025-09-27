@@ -19,7 +19,6 @@ class OrderManager:
     def place_grid_buy(self, price, qty, index):
         price = self.client.round_price(price)
         qty = self.client.round_qty(qty)
-        # Usar un client order id único (timestamp)
         cId = f"GRID_BUY_{index}_{int(time.time()*1000)}"
         return self.client.place_limit('BUY', price, qty, reduce_only=False, newClientOrderId=cId)
 
@@ -95,10 +94,6 @@ class OrderManager:
         return {'created': len(to_create), 'canceled': len(to_cancel), 'kept': len(matched_ids)}
 
     def ensure_take_profits(self, avg_entry, qty, open_orders, offset=0.0002):
-        """
-        Establece TP a +0.3% sobre el precio promedio de entrada.
-        Solo crea TP si no existe en rango y mejora el promedio.
-        """
         tp_price = self.client.round_price(avg_entry * 1.003)
         qty = self.client.round_qty(qty)
         tp_orders = [o for o in open_orders if o.get('side') == 'SELL' and o.get('reduceOnly')]
@@ -110,17 +105,4 @@ class OrderManager:
 
     def ensure_stop_loss(self, stop_price):
         stop_price = self.client.round_price(stop_price)
-        open_orders = self.get_open_orders()
-        sls = [o for o in open_orders if o.get('type') in (ORDER_TYPE_STOP_MARKET,'STOP') and o.get('closePosition') in (True,'true','True')]
-        tolerance = 0.002
-        for o in sls:
-            try:
-                sp = float(o.get('stopPrice') or 0)
-            except Exception:
-                sp = 0
-            if abs(sp - stop_price)/stop_price <= tolerance:
-                return {'kept': True}
-            else:
-                self.cancel_order(o['orderId'])
         self.place_sl_close_position(stop_price)
-        return {'created': True}
