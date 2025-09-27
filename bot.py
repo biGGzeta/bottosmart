@@ -8,6 +8,9 @@ from state_manager import StateManager
 import strategy
 from grid_manager import GridManager
 
+# Importar la nueva estrategia ShockRetest
+from strategy_shockretest import ShockRetestStrategy
+
 from config import (
     SYMBOL, STOP_LOSS_PERCENTAGE, PAPER_MODE, MAKER_FEE_RATE,
 )
@@ -23,8 +26,12 @@ class GridBot:
         self.grid_manager = GridManager(self.orders, self.state)
         self.last_price = None
         self.last_signal = None
-
+        self.shock_strategy = ShockRetestStrategy()
         print(f"[INFO] PAPER_MODE={'ON' if PAPER_MODE else 'OFF'} | ENV={'TEST' if self.client.client.testnet else 'PROD'} | Symbol={SYMBOL}")
+
+        # Estructura para guardar velas 1m y 15m para la estrategia
+        self.df_1m = []
+        self.df_15m = []
 
     async def proteger_posicion_existente(self):
         pos_info = self.client.futures_position_information()
@@ -59,7 +66,36 @@ class GridBot:
         else:
             print("[STARTUP] No hay posición abierta al iniciar el bot.")
 
+    def actualizar_velas(self, candle_1m, candle_15m=None):
+        # Este método debe ser llamado por el handler de datos de mercado para actualizar las velas
+        self.df_1m.append(candle_1m)
+        if candle_15m:
+            self.df_15m.append(candle_15m)
+        # Limita la cantidad de velas guardadas (memoria)
+        self.df_1m = self.df_1m[-500:]
+        self.df_15m = self.df_15m[-100:]
+
+    async def procesar_candle(self, candle_1m, candle_15m=None):
+        # Actualiza las velas para la estrategia
+        self.actualizar_velas(candle_1m, candle_15m)
+        # Convierte las listas a DataFrame para la estrategia
+        import pandas as pd
+        df_1m = pd.DataFrame(self.df_1m)
+        df_15m = pd.DataFrame(self.df_15m) if self.df_15m else None
+
+        # Ejecuta la lógica ShockRetest y envía señales al GridManager
+        self.shock_strategy.on_new_candle(candle_1m, df_1m, df_15m)
+        # Si la estrategia generó señales, las procesa
+        while self.shock_strategy.signals:
+            signal = self.shock_strategy.signals.pop(0)
+            self.last_signal = signal
+            self.grid_manager.handle_signal(signal, candle_1m['close'])
+
+        self.grid_manager.check_expiry()
+        await self.colocar_tp_y_sl_si_corresponde()
+
     async def procesar_trade(self, msg):
+        # Modo legacy: sigue usando la lógica anterior
         sig = strategy.analizar_trade(msg)
         try:
             self.last_price = float(msg.get('p') or self.last_price or 0)
@@ -67,9 +103,6 @@ class GridBot:
             pass
         if sig:
             self.last_signal = sig
-            # Aquí cada señal podría incluir flags/actions para gestión avanzada
-            # Ejemplo:
-            # sig = {"tipo": "DUMP", "cancel_all_limits": True, "adjust_tp": True, "adjust_sl": True, "nuevo_grid": True}
             self.grid_manager.handle_signal(sig, self.last_price)
         self.grid_manager.check_expiry()
         await self.colocar_tp_y_sl_si_corresponde()
@@ -166,7 +199,11 @@ class GridBot:
         ws = WebSocketManager()
         async def handler(msg, tipo):
             try:
-                if tipo == 'TRADE':
+                # Si tienes acceso a las velas 1m y 15m aquí, llama a procesar_candle
+                if tipo == 'CANDLE_1M':
+                    # msg debe ser un dict con datos OHLCV y timestamp
+                    await self.procesar_candle(msg)
+                elif tipo == 'TRADE':
                     await self.procesar_trade(msg)
                 elif tipo == 'DEPTH':
                     await self.procesar_depth(msg)
@@ -179,6 +216,6 @@ class GridBot:
         await ws.start_all(handler)
 
 if __name__ == "__main__":
-    print("[BOT] Iniciando ETH Grid Bot Dinámico con GridManager...")
+    print("[BOT] Iniciando ETH Grid Bot Dinámico con GridManager y ShockRetestStrategy...")
     bot = GridBot()
     asyncio.run(bot.run())
