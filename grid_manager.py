@@ -6,7 +6,7 @@ class GridManager:
     def __init__(self, orders, state):
         self.orders = orders
         self.state = state
-        # Valores base (defaults de config)
+        # Defaults from config
         self.min_grid_spacing = MIN_GRID_SPACING
         self.max_grid_spacing = MAX_GRID_SPACING
         self.grid_range_min = GRID_RANGE_MIN
@@ -15,7 +15,7 @@ class GridManager:
         self.leverage = LEVERAGE
         self.safe_spread = SAFE_SPREAD
 
-        # Estado dinámico
+        # Dynamic state
         self.grid_active = False
         self.last_signal = None
         self.last_grid_time = 0
@@ -23,12 +23,36 @@ class GridManager:
         self.expiry_time = None
         self.override_params = {}
 
+    def handle_signal(self, signal, price):
+        """Interpret and execute management plan based on signal dict."""
+        # Cancel/correct limit orders if instructed
+        if signal.get("cancel_all_limits", True):
+            self.orders.cancel_all()
+
+        # TP/SL adjust
+        if signal.get("adjust_tp", True):
+            avg = self.state.calcular_costo_promedio()
+            pos = float(self.state.state.get('posicion_total', 0.0))
+            open_orders = self.orders.get_open_orders()
+            self.orders.ensure_take_profits(avg, pos, open_orders, offset=0.0002)
+        if signal.get("adjust_sl", True):
+            avg = self.state.calcular_costo_promedio()
+            sl_price = avg * (1 - self.safe_spread)
+            self.orders.colocar_stop_loss_close_position(sl_price)
+
+        # Grid logic
+        if signal.get("nuevo_grid", True):
+            self.activate_grid(price, signal)
+
+        # Log plan of action
+        self._log_status("Signal handled.")
+
     def activate_grid(self, price, signal, expiry=None, override=None):
-        """Activa el grid tras recibir una señal relevante, con opcional override."""
+        """Activate grid with optional overrides from signal."""
         self.last_signal = signal
         self.grid_active = True
         self.expiry_time = expiry if expiry is not None else (time.time() + REBALANCE_SECONDS)
-        # Override dinámico
+        # Use override from signal if present
         params = {
             "min_grid_spacing": self.min_grid_spacing,
             "max_grid_spacing": self.max_grid_spacing,
@@ -38,6 +62,9 @@ class GridManager:
         if override:
             params.update(override)
             self.override_params = override
+        elif "override" in signal:
+            params.update(signal["override"])
+            self.override_params = signal["override"]
         else:
             self.override_params = {}
 
@@ -49,7 +76,7 @@ class GridManager:
         self._log_status("Grid activado.")
 
     def deactivate_grid(self):
-        """Desactiva el grid y cancela órdenes abiertas."""
+        """Deactivate grid and cancel all open orders."""
         self.grid_active = False
         self.current_levels = []
         self.orders.cancel_all()
@@ -58,7 +85,7 @@ class GridManager:
         self._log_status("Grid desactivado.")
 
     def _place_grid_orders(self):
-        """Coloca órdenes limit en los niveles calculados."""
+        """Place limit orders at grid levels."""
         avg_entry = self.state.calcular_costo_promedio()
         for i, p in enumerate(self.current_levels):
             if p is None or p == 0:
@@ -76,7 +103,7 @@ class GridManager:
                 print(f"[ERROR] crear orden grid: {e}")
 
     def check_expiry(self):
-        """Chequea si el grid debe expirar y ser desactivado."""
+        """Check if grid should expire and be deactivated."""
         if self.grid_active and self.expiry_time is not None and time.time() > self.expiry_time:
             print("[GRID] Grid expiró, desactivando...")
             self.deactivate_grid()
@@ -85,7 +112,7 @@ class GridManager:
         return self.grid_active
 
     def override_config(self, **kwargs):
-        """Permite override de parámetros en tiempo real."""
+        """Allow override of parameters in real time."""
         self.override_params.update(kwargs)
 
     def reset_override(self):
