@@ -18,7 +18,6 @@ class StateManager:
         self.load_state()
 
     def ensure_defaults(self):
-        # Completar claves faltantes (migración desde versiones anteriores)
         for k, v in DEFAULT_STATE.items():
             if k not in self.state:
                 self.state[k] = v
@@ -41,7 +40,6 @@ class StateManager:
             print(f"[ERROR] Guardar estado: {e}")
 
     def agregar_compra(self, precio, cantidad, fee=0.0):
-        # Agregar compra y actualizar posición neta
         self.state['grids_activados'].append({"precio": precio, "cantidad": cantidad})
         self.state['posicion_total'] += float(cantidad)
         self.state['costo_total'] += float(cantidad) * float(precio)
@@ -52,7 +50,6 @@ class StateManager:
     def agregar_venta(self, precio, cantidad, fee=0.0):
         cantidad = float(cantidad)
         precio = float(precio)
-        # Descontar costo proporcional según avg_cost actual
         avg = self.calcular_costo_promedio()
         costo_reducir = avg * cantidad
         self.state['costo_total'] = max(0.0, float(self.state['costo_total']) - costo_reducir)
