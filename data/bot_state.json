@@ -1,0 +1,101 @@
+{
+  "grids_activados": [
+    {
+      "precio": 4016.48,
+      "cantidad": 0.024
+    },
+    {
+      "precio": 4014.69,
+      "cantidad": 0.024
+    },
+    {
+      "precio": 4009.12,
+      "cantidad": 0.024
+    },
+    {
+      "precio": 4010.21,
+      "cantidad": 0.024
+    },
+    {
+      "precio": 4007.08,
+      "cantidad": 0.024
+    },
+    {
+      "precio": 4005.57,
+      "cantidad": 0.024
+    },
+    {
+      "precio": 3999.51,
+      "cantidad": 0.025
+    },
+    {
+      "precio": 4000.78,
+      "cantidad": 0.024
+    },
+    {
+      "precio": 4012.41,
+      "cantidad": 0.024
+    }
+  ],
+  "posicion_total": 0.21699999999999997,
+  "costo_total": 869.81991,
+  "fees_total": 0.17396393999999998,
+  "fills": [
+    {
+      "side": "BUY",
+      "precio": 4016.48,
+      "cantidad": 0.024,
+      "fee": 0.0192791
+    },
+    {
+      "side": "BUY",
+      "precio": 4014.69,
+      "cantidad": 0.024,
+      "fee": 0.01927051
+    },
+    {
+      "side": "BUY",
+      "precio": 4009.12,
+      "cantidad": 0.024,
+      "fee": 0.01924377
+    },
+    {
+      "side": "BUY",
+      "precio": 4010.21,
+      "cantidad": 0.024,
+      "fee": 0.019249
+    },
+    {
+      "side": "BUY",
+      "precio": 4007.08,
+      "cantidad": 0.024,
+      "fee": 0.01923398
+    },
+    {
+      "side": "BUY",
+      "precio": 4005.57,
+      "cantidad": 0.024,
+      "fee": 0.01922673
+    },
+    {
+      "side": "BUY",
+      "precio": 3999.51,
+      "cantidad": 0.025,
+      "fee": 0.01999755
+    },
+    {
+      "side": "BUY",
+      "precio": 4000.78,
+      "cantidad": 0.024,
+      "fee": 0.01920374
+    },
+    {
+      "side": "BUY",
+      "precio": 4012.41,
+      "cantidad": 0.024,
+      "fee": 0.01925956
+    }
+  ],
+  "tp_orders": [],
+  "sl_order_id": null
+}

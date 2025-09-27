@@ -1,0 +1,45 @@
+{
+  "timestamp": "2025-09-27T20:05:33.908315+00:00",
+  "signal": {
+    "tipo": "SOPORTE",
+    "precio": 200.0,
+    "volumen": 1578.6680000000001
+  },
+  "last_price": 4003.59,
+  "position": {
+    "qty": 0.07500000000000001,
+    "avg": 3993.5766666666664,
+    "fees": 0.05990364000000001
+  },
+  "open_orders": [
+    {
+      "side": "SELL",
+      "price": "4005.56",
+      "qty": "0.075",
+      "reduceOnly": true
+    },
+    {
+      "side": "SELL",
+      "price": "0",
+      "qty": "0",
+      "reduceOnly": true
+    }
+  ],
+  "take_profits": [
+    {
+      "price": "4005.56",
+      "qty": "0.075",
+      "clientOrderId": "TP_AUTO_TP_1759003532999"
+    },
+    {
+      "price": "0",
+      "qty": "0",
+      "clientOrderId": "x-Cb7ytekJ2f1339407b30e29deaca5d"
+    }
+  ],
+  "stop_loss": {
+    "price": "3793.90"
+  },
+  "bot_version": "v1",
+  "symbol": "ETHUSDT"
+}
