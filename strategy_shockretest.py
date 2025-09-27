@@ -5,23 +5,20 @@ from shockretest_utils import *
 class ShockRetestStrategy:
     def __init__(self):
         self.last_shock = None
-        self.shock_window = []  # Guarda shocks recientes para retest
-        self.retest_events = []
+        self.shock_window = []
         self.signals = []
 
     def on_new_candle(self, candle, df_1m, df_15m=None):
-        """Llama cada vez que hay una nueva vela 1m. candle = dict con 'open','high','low','close','volume','timestamp'"""
         open_, high, low, close, volume = candle['open'], candle['high'], candle['low'], candle['close'], candle['volume']
         idx = candle['timestamp']
 
         # ATR y ADX
-        atr = calc_atr(df_1m['close'], df_1m['high'], df_1m['low'], SHOCK_ATR_WINDOW)[-1]
+        atr = calc_atr(df_1m['close'], df_1m['high'], df_1m['low'], SHOCK_ATR_WINDOW).iloc[-1] if len(df_1m) >= SHOCK_ATR_WINDOW else 0
         adx = None
-        if df_15m is not None:
+        if df_15m is not None and len(df_15m) >= ADX_FILTER_WINDOW:
             adx = calc_adx(df_15m['high'], df_15m['low'], df_15m['close'], ADX_FILTER_WINDOW)[-1]
 
-        # Detectar shock
-        abs_ret = abs(close - open_) / open_
+        abs_ret = abs(close - open_) / open_ if open_ else 0
         body = abs(close - open_)
         is_up = close > open_
         is_down = close < open_
@@ -36,32 +33,26 @@ class ShockRetestStrategy:
                 'body': body,
                 'atr': atr,
                 'abs_ret': abs_ret,
-                'direction': 'up' if is_up else 'down'
+                'direction': 'up' if is_up else 'down',
+                'halfback': calc_halfback(open_, close),
+                'avwap': calc_avwap(df_1m['close'].iloc[-AVWAP_WINDOW:], df_1m['volume'].iloc[-AVWAP_WINDOW:]) if len(df_1m) >= AVWAP_WINDOW else open_,
             }
+            prev_candle = df_1m.iloc[-2] if len(df_1m) > 1 else None
+            if prev_candle is not None:
+                fvg = detect_fvg(high, low, prev_candle['high'], prev_candle['low'], FVG_MIN_GAP)
+                if fvg:
+                    shock_event['fvg'] = fvg
             self.last_shock = shock_event
             self.shock_window.append(shock_event)
-            # Calcula zonas de retest
-            shock_event['halfback'] = calc_halfback(open_, close)
-            shock_event['avwap'] = calc_avwap(df_1m['close'][-AVWAP_WINDOW:], df_1m['volume'][-AVWAP_WINDOW:])
-            shock_event['open'] = open_
-            # FVG (opcional)
-            prev_candle = df_1m.iloc[-2]
-            fvg = detect_fvg(high, low, prev_candle['high'], prev_candle['low'], FVG_MIN_GAP)
-            if fvg:
-                shock_event['fvg'] = fvg
 
-        # Proceso de retest
         self.check_retest(candle, df_1m)
 
     def check_retest(self, candle, df_1m):
-        """Chequea si hay retest de zonas dentro de la ventana T"""
         for shock_event in list(self.shock_window):
-            # Retest window
             if candle['timestamp'] - shock_event['timestamp'] > RETEST_WINDOW * 60:
                 self.shock_window.remove(shock_event)
                 continue
 
-            # Check zones
             touched_zones = []
             if self.zone_touched(candle['low'], candle['high'], shock_event['halfback']):
                 touched_zones.append('halfback')
@@ -73,24 +64,18 @@ class ShockRetestStrategy:
                 touched_zones.append('fvg')
 
             if touched_zones:
-                # Trigger fade o continuación
                 setup = self.setup_decision(candle, shock_event, touched_zones, df_1m)
                 if setup:
                     self.send_signal(setup, shock_event, candle)
                 self.shock_window.remove(shock_event)
 
     def zone_touched(self, low, high, zone):
-        """Chequea si la zona fue tocada"""
         return low <= zone <= high
 
     def setup_decision(self, candle, shock_event, touched_zones, df_1m):
-        """Decide fade o continuación según trigger"""
-        # Simplificación: Si se toca HB y hay reversión de swing, fade. Si se toca HB y retoma dirección, continuación.
         close = candle['close']
-        # Swing detection
         fade_trigger = swing_detection(df_1m['close'], window=3)[-1]
         if 'halfback' in touched_zones and fade_trigger:
-            # Fade: reversión a HB con swing contrario al shock
             signal = {
                 "tipo": "FADE_SHOCK",
                 "timestamp": candle['timestamp'],
@@ -110,7 +95,6 @@ class ShockRetestStrategy:
             }
             return signal
 
-        # Continuación: retest HB y retoma dirección original
         if 'halfback' in touched_zones and not fade_trigger:
             signal = {
                 "tipo": "CONTINUATION_SHOCK",
@@ -133,7 +117,5 @@ class ShockRetestStrategy:
         return None
 
     def send_signal(self, signal, shock_event, candle):
-        """Envía la señal estructurada al GridManager"""
         self.signals.append(signal)
-        # Aquí deberías llamar a grid_manager.handle_signal(signal, candle['close'])
         print(f"[ShockRetestStrategy] Enviando señal: {signal['tipo']} a precio {signal['precio']} (timestamp {signal['timestamp']})")
