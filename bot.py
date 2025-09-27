@@ -1,5 +1,6 @@
 import asyncio
 import time
+import pandas as pd
 from datetime import datetime, UTC
 from websocket_listener import WebSocketManager
 from binance_client import BinanceClient
@@ -8,7 +9,7 @@ from state_manager import StateManager
 import strategy
 from grid_manager import GridManager
 
-# Importar la nueva estrategia ShockRetest
+# Integración ShockRetestStrategy
 from strategy_shockretest import ShockRetestStrategy
 
 from config import (
@@ -26,12 +27,13 @@ class GridBot:
         self.grid_manager = GridManager(self.orders, self.state)
         self.last_price = None
         self.last_signal = None
-        self.shock_strategy = ShockRetestStrategy()
-        print(f"[INFO] PAPER_MODE={'ON' if PAPER_MODE else 'OFF'} | ENV={'TEST' if self.client.client.testnet else 'PROD'} | Symbol={SYMBOL}")
 
-        # Estructura para guardar velas 1m y 15m para la estrategia
-        self.df_1m = []
-        self.df_15m = []
+        # ShockRetestStrategy
+        self.shock_strategy = ShockRetestStrategy()
+        self.candles_1m = []
+        self.candles_15m = []  # Opcional, si tienes velas 15m
+
+        print(f"[INFO] PAPER_MODE={'ON' if PAPER_MODE else 'OFF'} | ENV={'TEST' if self.client.client.testnet else 'PROD'} | Symbol={SYMBOL}")
 
     async def proteger_posicion_existente(self):
         pos_info = self.client.futures_position_information()
@@ -66,36 +68,33 @@ class GridBot:
         else:
             print("[STARTUP] No hay posición abierta al iniciar el bot.")
 
-    def actualizar_velas(self, candle_1m, candle_15m=None):
-        # Este método debe ser llamado por el handler de datos de mercado para actualizar las velas
-        self.df_1m.append(candle_1m)
-        if candle_15m:
-            self.df_15m.append(candle_15m)
-        # Limita la cantidad de velas guardadas (memoria)
-        self.df_1m = self.df_1m[-500:]
-        self.df_15m = self.df_15m[-100:]
+    def agregar_candle_1m(self, candle):
+        """Agrega una vela 1m (dict) al buffer."""
+        self.candles_1m.append(candle)
+        self.candles_1m = self.candles_1m[-500:]  # Mantén buffer
 
-    async def procesar_candle(self, candle_1m, candle_15m=None):
-        # Actualiza las velas para la estrategia
-        self.actualizar_velas(candle_1m, candle_15m)
-        # Convierte las listas a DataFrame para la estrategia
-        import pandas as pd
-        df_1m = pd.DataFrame(self.df_1m)
-        df_15m = pd.DataFrame(self.df_15m) if self.df_15m else None
+    def agregar_candle_15m(self, candle):
+        """Opcional: Agrega una vela 15m (dict) al buffer."""
+        self.candles_15m.append(candle)
+        self.candles_15m = self.candles_15m[-100:]
 
-        # Ejecuta la lógica ShockRetest y envía señales al GridManager
-        self.shock_strategy.on_new_candle(candle_1m, df_1m, df_15m)
-        # Si la estrategia generó señales, las procesa
+    async def procesar_candle_1m(self, candle):
+        """Procesa cada vela 1m y ejecuta ShockRetestStrategy."""
+        self.agregar_candle_1m(candle)
+        df_1m = pd.DataFrame(self.candles_1m)
+        df_15m = pd.DataFrame(self.candles_15m) if self.candles_15m else None
+
+        # Ejecuta estrategia ShockRetest y envía señales al GridManager
+        self.shock_strategy.on_new_candle(candle, df_1m, df_15m)
         while self.shock_strategy.signals:
             signal = self.shock_strategy.signals.pop(0)
             self.last_signal = signal
-            self.grid_manager.handle_signal(signal, candle_1m['close'])
+            self.grid_manager.handle_signal(signal, candle['close'])
 
         self.grid_manager.check_expiry()
         await self.colocar_tp_y_sl_si_corresponde()
 
     async def procesar_trade(self, msg):
-        # Modo legacy: sigue usando la lógica anterior
         sig = strategy.analizar_trade(msg)
         try:
             self.last_price = float(msg.get('p') or self.last_price or 0)
@@ -199,10 +198,9 @@ class GridBot:
         ws = WebSocketManager()
         async def handler(msg, tipo):
             try:
-                # Si tienes acceso a las velas 1m y 15m aquí, llama a procesar_candle
+                # Si recibes velas 1m del websocket, llama al procesador de la estrategia
                 if tipo == 'CANDLE_1M':
-                    # msg debe ser un dict con datos OHLCV y timestamp
-                    await self.procesar_candle(msg)
+                    await self.procesar_candle_1m(msg)
                 elif tipo == 'TRADE':
                     await self.procesar_trade(msg)
                 elif tipo == 'DEPTH':
@@ -211,6 +209,9 @@ class GridBot:
                     await self.procesar_ticker(msg)
                 elif tipo == 'USER':
                     await self.procesar_user(msg)
+                # Si tienes velas 15m, puedes agregarlas también
+                elif tipo == 'CANDLE_15M':
+                    self.agregar_candle_15m(msg)
             except Exception as e:
                 print(f"[ERROR] Handler {tipo}: {e}")
         await ws.start_all(handler)
