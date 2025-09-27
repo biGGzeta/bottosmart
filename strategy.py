@@ -32,7 +32,7 @@ def evaluar_senales():
     if freq > 15 and vol_ventas > 10:
         if now - _last_dump_ts > COOLDOWN_MS:
             _last_dump_ts = now
-            return 'DUMP'
+            return {"tipo": "DUMP", "cancel_all_limits": True, "adjust_tp": True, "adjust_sl": True, "nuevo_grid": True}
     return None
 
 def analizar_depth(depth_msg):
@@ -53,18 +53,18 @@ def analizar_depth(depth_msg):
     now = int(time.time() * 1000)
     if top5_vol > 100 and now - _last_support_ts > COOLDOWN_MS:
         _last_support_ts = now
-        return {'tipo': 'SOPORTE', 'precio': top_bid_price, 'volumen': top5_vol}
+        return {"tipo": "SOPORTE", "precio": top_bid_price, "volumen": top5_vol, "cancel_all_limits": True, "adjust_tp": True, "adjust_sl": True, "nuevo_grid": True}
     return None
 
 def recomendar_spacing(signal, min_spacing, max_spacing):
-    if signal == 'DUMP':
+    if isinstance(signal, dict) and signal.get('tipo') == 'DUMP':
         return max_spacing
     if isinstance(signal, dict) and signal.get('tipo') == 'SOPORTE':
         return min_spacing
     return (min_spacing + max_spacing) / 2.0
 
 def recomendar_rango(signal, min_range, max_range):
-    if signal == 'DUMP':
+    if isinstance(signal, dict) and signal.get('tipo') == 'DUMP':
         return max_range
     if isinstance(signal, dict) and signal.get('tipo') == 'SOPORTE':
         return min_range
