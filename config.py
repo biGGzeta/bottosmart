@@ -2,7 +2,6 @@ API_KEY = ''
 API_SECRET = ''
 
 
-
 SYMBOL = 'ETHUSDC'
 LEVERAGE = 10
 
