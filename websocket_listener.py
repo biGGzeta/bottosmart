@@ -4,8 +4,9 @@ import websockets
 from config import SYMBOL, USE_TESTNET, PAPER_MODE
 from binance_client import BinanceClient
 
-WS_FAPI_MAIN = 'wss://fstream.binance.com/ws'
-WS_FAPI_TEST = 'wss://stream.binancefuture.com/ws'
+WS_FAPI_MAIN = "wss://fstream.binance.com/ws"
+WS_FAPI_TEST = "wss://stream.binancefuture.com/ws"
+
 
 class WebSocketManager:
     def __init__(self):
@@ -23,7 +24,9 @@ class WebSocketManager:
         backoff = 1
         while not self._stop:
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=20
+                ) as ws:
                     print(f"[WS] Conectado a {name}")
                     backoff = 1
                     async for msg in ws:
@@ -55,7 +58,7 @@ class WebSocketManager:
 
         ka_task = asyncio.create_task(keepalive())
         try:
-            await self._connect_and_listen(self.user_url, 'USER', handler)
+            await self._connect_and_listen(self.user_url, "USER", handler)
         finally:
             ka_task.cancel()
             try:
@@ -65,9 +68,9 @@ class WebSocketManager:
 
     async def start_all(self, handler):
         tasks = [
-            self._connect_and_listen(self.trade_url, 'TRADE', handler),
-            self._connect_and_listen(self.depth_url, 'DEPTH', handler),
-            self._connect_and_listen(self.ticker_url, 'TICKER', handler),
+            self._connect_and_listen(self.trade_url, "TRADE", handler),
+            self._connect_and_listen(self.depth_url, "DEPTH", handler),
+            self._connect_and_listen(self.ticker_url, "TICKER", handler),
         ]
         if not PAPER_MODE:
             tasks.append(self._user_stream_task(handler))
