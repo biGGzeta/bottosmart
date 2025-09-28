@@ -25,11 +25,31 @@ class GridManager:
 
     def handle_signal(self, signal, price):
         """Interpret and execute management plan based on signal dict."""
+        # Handle dynamic recalibration and TP/SL updates
+        recalibrate_grid = signal.get("recalibrate_grid", False)
+        update_tp_sl = signal.get("update_tp_sl", False)
+        force_regrid = signal.get("force_regrid", False)
+        
+        # If grid is active and not expired, handle recalibration/updates
+        if self.grid_active and not force_regrid:
+            if recalibrate_grid:
+                self._recalibrate_grid(price, signal)
+                self._log_status("Grid recalibrated.")
+            
+            if update_tp_sl or signal.get("adjust_tp", False) or signal.get("adjust_sl", False):
+                self._update_tp_sl(signal)
+                self._log_status("TP/SL updated.")
+            
+            # If we're only recalibrating or updating TP/SL, return early
+            if (recalibrate_grid or update_tp_sl) and not signal.get("nuevo_grid", False):
+                return
+
+        # Traditional signal handling for new grids or forced regrids
         # Cancel/correct limit orders if instructed
         if signal.get("cancel_all_limits", True):
             self.orders.cancel_all()
 
-        # TP/SL adjust
+        # TP/SL adjust (traditional behavior)
         if signal.get("adjust_tp", True):
             avg = self.state.calcular_costo_promedio()
             pos = float(self.state.state.get('posicion_total', 0.0))
@@ -40,9 +60,12 @@ class GridManager:
             sl_price = avg * (1 - self.safe_spread)
             self.orders.colocar_stop_loss_close_position(sl_price)
 
-        # Grid logic
+        # Grid logic - only create new grid if not active, expired, or forced
         if signal.get("nuevo_grid", True):
-            self.activate_grid(price, signal)
+            if not self.grid_active or force_regrid or (self.expiry_time and time.time() > self.expiry_time):
+                self.activate_grid(price, signal)
+            else:
+                self._log_status("Grid already active and not expired. Skipping new grid creation.")
 
         # Log plan of action
         self._log_status("Signal handled.")
@@ -101,6 +124,66 @@ class GridManager:
                 self.orders.place_grid_buy(p, qty, i)
             except Exception as e:
                 print(f"[ERROR] crear orden grid: {e}")
+
+    def _recalibrate_grid(self, price, signal):
+        """Recalibrate active grid without destroying it completely."""
+        if not self.grid_active:
+            return
+            
+        # Use signal overrides if present, otherwise keep current params
+        params = {
+            "min_grid_spacing": self.min_grid_spacing,
+            "max_grid_spacing": self.max_grid_spacing,
+            "grid_range_min": self.grid_range_min,
+            "grid_range_max": self.grid_range_max,
+        }
+        
+        # Update params from signal override
+        if "override" in signal:
+            params.update(signal["override"])
+            self.override_params.update(signal["override"])
+        
+        # Calculate new grid levels
+        spacing = recomendar_spacing(signal, params["min_grid_spacing"], params["max_grid_spacing"])
+        rango = recomendar_rango(signal, params["grid_range_min"], params["grid_range_max"])
+        new_levels = construir_grid(price, spacing, rango)
+        
+        # Use reconcile_grid to update orders efficiently
+        avg_entry = self.state.calcular_costo_promedio()
+        valid_levels = []
+        for p in new_levels:
+            if p is None or p == 0:
+                continue
+            if avg_entry and p >= avg_entry:
+                continue
+            if avg_entry and ((avg_entry - p)/avg_entry < self.safe_spread):
+                continue
+            valid_levels.append(p)
+        
+        if valid_levels:
+            qty = self.orders.calcular_cantidad(price, self.order_usdt_size, self.leverage)
+            if qty and qty > 0:
+                result = self.orders.reconcile_grid(valid_levels, qty)
+                print(f"[GRID] Recalibrated: {result}")
+        
+        # Update current levels
+        self.current_levels = new_levels
+        self.last_signal = signal
+
+    def _update_tp_sl(self, signal):
+        """Update TP/SL independently of grid operations."""
+        if signal.get("adjust_tp", True) or signal.get("update_tp_sl", False):
+            avg = self.state.calcular_costo_promedio()
+            pos = float(self.state.state.get('posicion_total', 0.0))
+            open_orders = self.orders.get_open_orders()
+            if avg and pos > 0:
+                self.orders.ensure_take_profits(avg, pos, open_orders, offset=0.0002)
+        
+        if signal.get("adjust_sl", True) or signal.get("update_tp_sl", False):
+            avg = self.state.calcular_costo_promedio()
+            if avg:
+                sl_price = avg * (1 - self.safe_spread)
+                self.orders.colocar_stop_loss_close_position(sl_price)
 
     def check_expiry(self):
         """Check if grid should expire and be deactivated."""
